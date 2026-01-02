@@ -1,8 +1,12 @@
-from flask import Flask, render_template, request, send_file, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, session, send_file
 import pandas as pd
 import os
 
 app = Flask(__name__)
+app.secret_key = 'care_web_secret_key_123'  # セッション用の秘密鍵（適宜変更してください）
+
+# ログイン用のユーザー情報（IDはadmin Passはpassword123）
+USER_DATA = {"username": "admin", "password": "password123"}
 
 DATA_FILE = "data/users.csv"
 if not os.path.exists("data"):
@@ -12,16 +16,42 @@ if not os.path.exists(DATA_FILE):
     df_init = pd.DataFrame(columns=["name", "care_manager", "care_level"])
     df_init.to_csv(DATA_FILE, index=False, encoding="utf-8")
 
-# 区分グループの定義
 SUPPORT_LEVELS = ["要支援１", "要支援２", "事業"]
 CARE_LEVELS = ["要介護１", "要介護２", "要介護３", "要介護４", "要介護５"]
 
-@app.route("/")
+# --- ログインチェック用関数 ---
+def is_logged_in():
+    return session.get('logged_in')
+
+# --- ルート定義 ---
+
+@app.route('/')
 def index():
+    if not is_logged_in():
+        return redirect(url_for('login'))
     return render_template("form.html")
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        if request.form['username'] == USER_DATA['username'] and \
+           request.form['password'] == USER_DATA['password']:
+            session['logged_in'] = True
+            return redirect(url_for('index'))
+        else:
+            return "ログイン失敗。やり直してください。<a href='/login'>戻る</a>"
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.pop('logged_in', None)
+    return redirect(url_for('login'))
 
 @app.route("/dashboard")
 def dashboard():
+    if not is_logged_in():
+        return redirect(url_for('login'))
+    
     if not os.path.exists(DATA_FILE):
         return "データファイルがありません。"
 
@@ -29,9 +59,7 @@ def dashboard():
     managers = sorted(df["care_manager"].unique().tolist())
     all_levels = SUPPORT_LEVELS + CARE_LEVELS
 
-    # 1. マトリックスデータ（名前リスト）の作成
     matrix = {l: {m: [] for m in managers} for l in all_levels}
-    # 2. カウントデータ（人数）の作成
     counts = {l: {m: 0 for m in managers} for l in all_levels}
     
     for idx, row in df.iterrows():
@@ -40,12 +68,10 @@ def dashboard():
             matrix[l][m].append({"id": idx, "name": row["name"]})
             counts[l][m] += 1
 
-    # 3. 集計（小計・合計）の計算
     subtotal_support = {m: sum(counts[l][m] for l in SUPPORT_LEVELS) for m in managers}
     subtotal_care = {m: sum(counts[l][m] for l in CARE_LEVELS) for m in managers}
     grand_totals = {m: subtotal_support[m] + subtotal_care[m] for m in managers}
 
-    # 行ごとの合計（一番右の列用）
     row_totals = {l: sum(counts[l].values()) for l in all_levels}
     row_subtotal_support = sum(subtotal_support.values())
     row_subtotal_care = sum(subtotal_care.values())
@@ -69,6 +95,7 @@ def dashboard():
 
 @app.route("/submit", methods=["POST"])
 def submit():
+    if not is_logged_in(): return redirect(url_for('login'))
     df = pd.read_csv(DATA_FILE)
     new_row = {
         "name": request.form.get("name"),
@@ -77,10 +104,11 @@ def submit():
     }
     df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
     df.to_csv(DATA_FILE, index=False, encoding="utf-8")
-    return redirect(url_for('dashboard')) # 保存後はダッシュボードへ
+    return redirect(url_for('dashboard'))
 
 @app.route("/delete/<int:user_id>")
 def delete_user(user_id):
+    if not is_logged_in(): return redirect(url_for('login'))
     df = pd.read_csv(DATA_FILE)
     df = df.drop(df.index[user_id]).reset_index(drop=True)
     df.to_csv(DATA_FILE, index=False, encoding="utf-8")
@@ -88,12 +116,14 @@ def delete_user(user_id):
 
 @app.route("/edit/<int:user_id>")
 def edit_page(user_id):
+    if not is_logged_in(): return redirect(url_for('login'))
     df = pd.read_csv(DATA_FILE)
     user_data = df.iloc[user_id].to_dict()
     return render_template("edit.html", user=user_data, user_id=user_id)
 
 @app.route("/update/<int:user_id>", methods=["POST"])
 def update_user(user_id):
+    if not is_logged_in(): return redirect(url_for('login'))
     df = pd.read_csv(DATA_FILE)
     df.at[user_id, "name"] = request.form.get("name")
     df.at[user_id, "care_manager"] = request.form.get("care_manager")
@@ -103,15 +133,13 @@ def update_user(user_id):
 
 @app.route("/rename_manager", methods=["POST"])
 def rename_manager():
+    if not is_logged_in(): return redirect(url_for('login'))
     old_name = request.form.get("old_name")
     new_name = request.form.get("new_name")
-    
     if old_name and new_name:
         df = pd.read_csv(DATA_FILE)
-        # 指定されたケアマネ名を一括で書き換え
         df["care_manager"] = df["care_manager"].replace(old_name, new_name)
         df.to_csv(DATA_FILE, index=False, encoding="utf-8")
-        
     return redirect(url_for('dashboard'))
 
 if __name__ == "__main__":
