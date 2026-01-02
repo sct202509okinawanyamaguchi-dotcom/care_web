@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>利用者一覧</title>
+</head>
+<body>
+
+<h1>利用者一覧</h1>
+
+<table border="1">
+  <tr>
+    <th>名前</th>
+    <th>担当ケアマネ</th>
+    <th>介護区分</th>
+  </tr>
+
+  {% for u in users %}
+  <tr>
+    <td>{{ u.name }}</td>
+    <td>{{ u.care_manager }}</td>
+    <td>{{ u.care_level }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<table class="table table-bordered bg-white shadow-sm">
+  <thead class="table-dark">
+    <tr>
+      <th>名前</th>
+      <th>ケアマネ</th>
+      <th>区分</th>
+      <th>操作</th> </tr>
+  </thead>
+  <tbody>
+    {% for u in users %}
+    <tr>
+      <td>{{ u.name }}</td>
+      <td>{{ u.care_manager }}</td>
+      <td>{{ u.care_level }}</td>
+      <td>
+        <a href="/edit/{{ loop.index0 }}" class="btn btn-sm btn-primary">編集</a>
+        <a href="/delete/{{ loop.index0 }}" class="btn btn-sm btn-danger" onclick="return confirm('本当に削除しますか？')">削除</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<a href="/">戻る</a>
+
+</body>
+</html>
