@@ -143,4 +143,7 @@ def rename_manager():
     return redirect(url_for('dashboard'))
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    # Renderなどの環境ではPORT環境変数を使うためのおまじない
+    import os
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
