@@ -142,6 +142,112 @@ def rename_manager():
         df.to_csv(DATA_FILE, index=False, encoding="utf-8")
     return redirect(url_for('dashboard'))
 
+# --- app.py の一番上の方に追加 ---
+from openpyxl.styles import Alignment  # これが必要！
+
+# --- app.py の download_excel 部分をこれに差し替え ---
+@app.route("/download")
+def download_excel():
+    if not is_logged_in():
+        return redirect(url_for('login'))
+    
+    if not os.path.exists(DATA_FILE):
+        return "データがありません。"
+
+    df = pd.read_csv(DATA_FILE)
+    if df.empty:
+        return "データが空です。"
+
+    # 1. 介護度の定義
+    support_levels = ["要支援１", "要支援２", "事業"]
+    care_levels = ["要介護１", "要介護２", "要介護３", "要介護４", "要介護５"]
+    all_levels = support_levels + care_levels
+
+    # 2. 名前マトリックスと人数マトリックスの作成
+    pivot_names = df.pivot_table(
+        index='care_level', columns='care_manager', values='name', 
+        aggfunc=lambda x: "\n".join(str(v) for v in x), fill_value=""
+    ).reindex(all_levels).fillna("")
+
+    pivot_counts = df.pivot_table(
+        index='care_level', columns='care_manager', values='name', 
+        aggfunc='count', fill_value=0
+    ).reindex(all_levels).fillna(0)
+
+    # 3. 横方向の「社内合計」を計算
+    pivot_names['社内合計'] = pivot_counts.sum(axis=1).astype(int).map(lambda x: f"{x}")
+    pivot_counts['社内合計'] = pivot_counts.sum(axis=1)
+
+    # 4. Excel用データフレームの構築
+    output_rows = []
+    managers_with_total = pivot_names.columns.tolist() # 「社内合計」も含まれる
+
+    for level in all_levels:
+        # 名前行
+        name_row = {m: pivot_names.loc[level, m] for m in managers_with_total}
+        name_row['区分'] = level
+        output_rows.append(name_row)
+        
+        # 人数行
+        count_row = {m: f"{int(pivot_counts.loc[level, m])}名" for m in managers_with_total}
+        count_row['区分'] = f"{level} 人数"
+        output_rows.append(count_row)
+
+    # 5. 縦方向の「総合計」行を作成して追加
+    grand_total_row = {'区分': '総合計'}
+    for m in managers_with_total:
+        total_val = pivot_counts[m].sum()
+        grand_total_row[m] = f"{int(total_val)}名"
+    output_rows.append(grand_total_row)
+
+    final_df = pd.DataFrame(output_rows)
+    final_df = final_df[['区分'] + managers_with_total]
+
+    # 6. Excel書き出し & 装飾
+    excel_file = "居宅支援名簿_完全集計版.xlsx"
+    with pd.ExcelWriter(excel_file, engine='openpyxl') as writer:
+        final_df.to_excel(writer, index=False, sheet_name='名簿')
+        ws = writer.sheets['名簿']
+        
+        from openpyxl.styles import Alignment, PatternFill, Font, Border, Side
+        
+        # 色の設定
+        header_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+        count_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+        total_fill = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid") # 総合計は赤系
+        
+        # 罫線の設定
+        thin = Side(border_style="thin", color="000000")
+        border = Border(top=thin, left=thin, right=thin, bottom=thin)
+
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
+            for cell in row:
+                cell.alignment = Alignment(wrapText=True, vertical='center', horizontal='center')
+                cell.border = border
+                
+                # 1行目（ヘッダー）
+                if cell.row == 1:
+                    cell.fill = header_fill
+                    cell.font = Font(bold=True)
+                
+                # A列（区分）
+                label = str(ws.cell(row=cell.row, column=1).value)
+                
+                # 人数行に色
+                if "人数" in label:
+                    cell.fill = count_fill
+                
+                # 総合計行に色
+                if "総合計" in label:
+                    cell.fill = total_fill
+                    cell.font = Font(bold=True)
+                
+                # 社内合計列（一番右）に太字
+                if cell.column == ws.max_column:
+                    cell.font = Font(bold=True)
+
+    return send_file(excel_file, as_attachment=True)
+
 if __name__ == "__main__":
     # Renderなどの環境ではPORT環境変数を使うためのおまじない
     import os
